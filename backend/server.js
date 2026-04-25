@@ -1,8 +1,10 @@
 const express = require("express");
 require("dotenv").config();
+const cors = require("cors");
 
 const app = express();
 app.use(express.json());
+app.use(cors());
 
 console.log("Server file loaded");
 
@@ -26,7 +28,7 @@ app.post('/getResponse', async (req, res) => {
             }
           ],
           generationConfig: {
-            maxOutputTokens: 100,   // limit tokens 
+            maxOutputTokens: 500,   // limit tokens 
             temperature:0.3, // creativity low -> direct answers
             topK:40 // reduce overthinking 
           }
