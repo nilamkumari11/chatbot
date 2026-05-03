@@ -1,0 +1,9 @@
+DNS (Domain Name System) is used to convert domain names into IP addresses. It helps users access websites using easy names instead of numerical IP addresses.
+
+HTTP (HyperText Transfer Protocol) is used for communication between web browsers and servers. It defines how messages are formatted and transmitted.
+
+FTP (File Transfer Protocol) is used to transfer files between computers over a network. It allows uploading and downloading of files.
+
+Email is a method of exchanging messages over the internet. It uses protocols like SMTP and POP3.
+
+A firewall is a security system that monitors and controls incoming and outgoing network traffic based on security rules.
