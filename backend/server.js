@@ -1,8 +1,10 @@
 import {client}  from "./redisClient.js";
 import express from "express";
+import fetch from "node-fetch";
 import dotenv from "dotenv";
 dotenv.config();
 import cors from "cors";
+import getRelevantChunks from "./routes/chat.js";
 
 const app = express();
 app.use(express.json());
@@ -19,57 +21,66 @@ app.post('/getResponse', async (req, res) => {
     const mode = req.body.mode || "simple";
     console.log("MODE RECEIVED:", mode);
     
-    // prompt 
-  
-    let finalPrompt = "";
-
-    if (mode === "exam") {
-      finalPrompt = `
-    You are an exam answer writer.
-
-    Answer the following question in STRICT exam format:
-    - Use headings
-    - Use bullet points
-    - Keep answer suitable for 5-7 marks
-    - Do NOT write long paragraphs
-
-    Question: ${userMessage}
-    `;
-    } 
-    else if (mode === "professional") {
-      finalPrompt = `
-    You are a professional technical expert.
-
-    Answer in:
-    - Formal tone
-    - Clear explanation
-    - Structured paragraphs
-    - Use technical terms where needed
-
-    Question: ${userMessage}
-    `;
-    } 
-    else {
-      finalPrompt = `
-    Explain in:
-    - Very simple language
-    - Easy to understand
-    - Use examples if possible
-
-    Question: ${userMessage}
-    `;
-    }
-   
     // const key = `${mode}:${userMessage}:${finalPrompt}`; // key
-    const key = `v1:${mode}:${userMessage.trim().toLowerCase()}`; // version used 
+    const key = `v2:${mode}:${userMessage.trim().toLowerCase()}`; // version used 
 
     // check cache 
     const cached = await client.get(key);
 
-    if(cached) {
-      console.log("Cache hit");
-      return res.json({reply: cached});
+    // if(cached) {
+    //   console.log("Cache hit");
+    //   return res.json({reply: cached});
+    // }
+
+        // prompt 
+     const context = (await getRelevantChunks(userMessage)) || "No relevant context found.";
+     console.log("CONTEXT:\n", context);
+    let finalPrompt = "";
+
+    if (mode === "exam") {
+          finalPrompt = `
+    You MUST answer ONLY using the given context.
+    DO NOT use your own knowledge.
+    If answer is not present in context, answer like a exam question answer in 3 or 5 marks.
+
+    Answer in:
+    - Headings
+    - Bullet points
+    - 5–7 marks format
+
+    Context:
+    ${context}
+
+    Question:
+    ${userMessage}
+    `;
+    } 
+    else if (mode === "professional") {
+      finalPrompt = `
+    Answer ONLY from the context below.
+    If not found, give professional answer.
+
+    Context:
+    ${context}
+
+    Question:
+    ${userMessage}
+    `;
+    } 
+    else {
+      finalPrompt = `
+      Answer ONLY from the context below.
+      If not found, Explain simply.
+
+    Context:
+    ${context}
+
+    Question:
+    ${userMessage}
+    `;
     }
+      
+    
 
     const apiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
