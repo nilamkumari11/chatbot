@@ -6,13 +6,13 @@ dotenv.config();
 import cors from "cors";
 import getRelevantChunks from "./routes/chat.js";
 
-const app = express();
-app.use(express.json());
-app.use(cors());
+const app = express(); // server created 
+app.use(express.json()); // read json body 
+app.use(cors()); // allows frontend to call body 
 
 console.log("Server file loaded");
 
-app.post('/getResponse', async (req, res) => {
+app.post('/getResponse', async (req, res) => { // frontend request 
   console.log("Route hit");
 
   try {
@@ -27,14 +27,16 @@ app.post('/getResponse', async (req, res) => {
     // check cache 
     const cached = await client.get(key);
 
-    // if(cached) {
-    //   console.log("Cache hit");
-    //   return res.json({reply: cached});
-    // }
+    if(cached) {
+      console.log("Cache hit");
+      return res.json({reply: cached});
+    }
 
         // prompt 
      const context = (await getRelevantChunks(userMessage)) || "No relevant context found.";
-     console.log("CONTEXT:\n", context);
+     console.log("CONTEXT:\n", context); // content from file 
+
+     // prompt building
     let finalPrompt = "";
 
     if (mode === "exam") {
@@ -58,7 +60,7 @@ app.post('/getResponse', async (req, res) => {
     else if (mode === "professional") {
       finalPrompt = `
     Answer ONLY from the context below.
-    If not found, give professional answer.
+    If not found, give professional answer like in high level language way.
 
     Context:
     ${context}
@@ -98,7 +100,7 @@ app.post('/getResponse', async (req, res) => {
           generationConfig: {
             maxOutputTokens: 500,   // limit tokens 
             temperature:0.3, // creativity low -> direct answers
-            topK:40 // reduce overthinking 
+            topK:40 // reduce overthinking -> limit randomness 
           }
         }),
       }
