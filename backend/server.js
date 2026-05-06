@@ -5,6 +5,8 @@ import dotenv from "dotenv";
 dotenv.config();
 import cors from "cors";
 import getRelevantChunks from "./routes/chat.js";
+import cosineSimilarity from "./utils/similarity.js";
+import getEmbedding from "./utils/embedding.js";
 
 const app = express(); // server created 
 app.use(express.json()); // read json body 
@@ -18,32 +20,82 @@ app.post('/getResponse', async (req, res) => { // frontend request
   try {
     
     const userMessage = req.body.msg;
+    const qEmbedding = await getEmbedding(userMessage);
     const mode = req.body.mode || "simple";
     console.log("MODE RECEIVED:", mode);
     
-    // const key = `${mode}:${userMessage}:${finalPrompt}`; // key
-    const key = `v2:${mode}:${userMessage.trim().toLowerCase()}`; // version used 
+    const key = `v3:${mode}:${userMessage.trim().toLowerCase()}`; // version used 
 
     // check cache 
     const cached = await client.get(key);
 
     if(cached) {
       console.log("Cache hit");
-      return res.json({reply: cached});
+
+      try {
+        const parsed = JSON.parse(cached);
+        return res.json({ reply: parsed.reply }); // ✅ FIXED
+      } catch {
+        return res.json({ reply: cached }); // fallback for old cache
+      }
     }
 
-        // prompt 
-     const context = (await getRelevantChunks(userMessage)) || "No relevant context found.";
-     console.log("CONTEXT:\n", context); // content from file 
+    // SEMANTIC CACHE 
 
-     // prompt building
+    const keys = await client.keys("v2:*");
+
+    let bestMatch = null; // best cached answer
+    let bestScore = 0; // highest similarity
+
+    for (let k of keys) {
+      const value = await client.get(k);
+
+      try {
+        const parsed = JSON.parse(value); // redis store string -> convert to object
+
+        if (!parsed.embedding) continue; // ignore old cache 
+
+        const score = cosineSimilarity(qEmbedding, parsed.embedding);
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = parsed;
+        }
+
+      } catch (err) {
+        // ignore old cache (string format)
+      }
+    }
+
+    if (bestScore > 0.9 && bestMatch) {
+      console.log("Semantic cache hit:", bestScore);
+      return res.json({ reply: bestMatch.reply });
+    }
+
+    // prompt 
+    // const context = (await getRelevantChunks(userMessage)) || "No relevant context found."; 
+    const ragResult = await getRelevantChunks(userMessage);
+
+    const context = ragResult.text;
+    const similarityScore = ragResult.score;
+    console.log("CONTEXT:\n", context); 
+
+    // check if context is actually useful
+    const hasValidContext =
+    context &&
+    similarityScore > 0.75; // threshold
+
+    console.log("HAS VALID CONTEXT:", hasValidContext);
+
+    // prompt building
     let finalPrompt = "";
 
     if (mode === "exam") {
-          finalPrompt = `
+
+      if (hasValidContext) {
+        finalPrompt = `
     You MUST answer ONLY using the given context.
     DO NOT use your own knowledge.
-    If answer is not present in context, answer like a exam question answer in 3 or 5 marks.
 
     Answer in:
     - Headings
@@ -56,11 +108,21 @@ app.post('/getResponse', async (req, res) => { // frontend request
     Question:
     ${userMessage}
     `;
+      } else {
+        finalPrompt = `
+    Answer the question in exam format (5–7 marks).
+
+    Question:
+    ${userMessage}
+    `;
+      }
+
     } 
     else if (mode === "professional") {
-      finalPrompt = `
+
+      if (hasValidContext) {
+        finalPrompt = `
     Answer ONLY from the context below.
-    If not found, give professional answer like in high level language way.
 
     Context:
     ${context}
@@ -68,21 +130,36 @@ app.post('/getResponse', async (req, res) => { // frontend request
     Question:
     ${userMessage}
     `;
+      } else {
+        finalPrompt = `
+    Answer this in a professional way:
+
+    ${userMessage}
+    `;
+      }
+
     } 
     else {
-      finalPrompt = `
+
+      if (hasValidContext) {
+        finalPrompt = `
       Answer ONLY from the context below.
-      If not found, Explain simply.
 
-    Context:
-    ${context}
+      Context:
+      ${context}
 
-    Question:
-    ${userMessage}
-    `;
+      Question:
+      ${userMessage}
+      `;
+      } else {
+        finalPrompt = `
+      Explain this in simple language:
+
+      ${userMessage}
+      `;
+      }
+
     }
-      
-    
 
     const apiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
@@ -98,9 +175,9 @@ app.post('/getResponse', async (req, res) => { // frontend request
             }
           ],
           generationConfig: {
-            maxOutputTokens: 500,   // limit tokens 
-            temperature:0.3, // creativity low -> direct answers
-            topK:40 // reduce overthinking -> limit randomness 
+            maxOutputTokens: 500,   
+            temperature:0.3, 
+            topK:40 
           }
         }),
       }
@@ -108,30 +185,33 @@ app.post('/getResponse', async (req, res) => { // frontend request
 
     const data = await apiRes.json();
 
-    // Debug 
     console.log("FULL RESPONSE:", JSON.stringify(data, null, 2));
 
-    // Handle API errors
     if (!data.candidates) {
       return res.json({
         reply: "AI is temporarily unavailable"
       });
     }
 
-    // Extract reply safely
     const reply =
       data?.candidates?.[0]?.content?.parts?.[0]?.text || "No response";
 
     // store in redis
-    await client.set(key, reply, {
-      EX: 300 // 5 minutes
-    });
+    await client.set(
+      key,
+      JSON.stringify({
+        question: userMessage,
+        embedding: qEmbedding,
+        reply: reply
+      }),
+      { EX: 300 }
+    );
 
     res.json({ reply });
 
   } catch (error) {
     console.error("ERROR:", error);
-    res.json({  reply: "AI is temporarily unavailable. Please try again later." });
+    res.json({ reply: "AI is temporarily unavailable. Please try again later." });
   }
 });
 

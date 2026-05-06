@@ -10,13 +10,17 @@ async function getRelevantChunks(question) { // get embedding of questions
   let scored = data.map(item => ({
     text: item.text,
     score: cosineSimilarity(qEmbedding, item.embedding)
-  }));
+  }))
+   .filter(item => item.score > 0.5); // remove irrelevant chunks
 
   scored.sort((a, b) => b.score - a.score); // sorts from most relevant to least relevant 
 
   const topChunks = scored.slice(0, 3).map(i => i.text); // top 3
 
-  return topChunks.join("\n");
+  return {
+  text: topChunks.join("\n"),
+  score: scored[0]?.score || 0
+};
 }
 
 export default getRelevantChunks;
