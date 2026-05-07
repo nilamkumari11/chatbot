@@ -83,7 +83,7 @@ app.post('/getResponse', async (req, res) => { // frontend request
     // check if context is actually useful
     const hasValidContext =
     context &&
-    similarityScore > 0.75; // threshold
+    similarityScore > 0.5; // threshold
 
     console.log("HAS VALID CONTEXT:", hasValidContext);
 
@@ -94,8 +94,9 @@ app.post('/getResponse', async (req, res) => { // frontend request
 
       if (hasValidContext) {
         finalPrompt = `
-    You MUST answer ONLY using the given context.
-    DO NOT use your own knowledge.
+    Use the context if it is relevant.
+  If the context is not relevant, answer normally using your own knowledge.
+  Don't mention about the context just start answering normally.
 
     Answer in:
     - Headings
@@ -122,7 +123,9 @@ app.post('/getResponse', async (req, res) => { // frontend request
 
       if (hasValidContext) {
         finalPrompt = `
-    Answer ONLY from the context below.
+    Use the context if it is relevant.
+    If the context is not relevant, answer normally using your own knowledge.
+    Don't mention about the context just start answering normally.
 
     Context:
     ${context}
@@ -143,7 +146,9 @@ app.post('/getResponse', async (req, res) => { // frontend request
 
       if (hasValidContext) {
         finalPrompt = `
-      Answer ONLY from the context below.
+      Use the context if it is relevant.
+      If the context is not relevant, answer normally using your own knowledge.
+      Don't mention about the context just start answering normally.
 
       Context:
       ${context}
@@ -197,6 +202,17 @@ app.post('/getResponse', async (req, res) => { // frontend request
       data?.candidates?.[0]?.content?.parts?.[0]?.text || "No response";
 
     // store in redis
+    const invalidReplies = [
+    "AI is temporarily unavailable",
+    "No response",
+    "The provided context does not contain"
+  ];
+
+  const shouldCache = !invalidReplies.some(msg =>
+    reply.toLowerCase().includes(msg.toLowerCase())
+  );
+
+  if (shouldCache) {
     await client.set(
       key,
       JSON.stringify({
@@ -206,6 +222,11 @@ app.post('/getResponse', async (req, res) => { // frontend request
       }),
       { EX: 300 }
     );
+
+    console.log("Stored in cache");
+  } else {
+    console.log("Skipped bad response cache");
+  }
 
     res.json({ reply });
 
