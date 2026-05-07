@@ -24,36 +24,36 @@ app.post('/getResponse', async (req, res) => { // frontend request
     const mode = req.body.mode || "simple";
     console.log("MODE RECEIVED:", mode);
     
-    const key = `v3:${mode}:${userMessage.trim().toLowerCase()}`; // version used 
+    const key = `v2:${mode}:${userMessage.trim().toLowerCase()}`; // version used 
 
-    // check cache 
+    // check cache exact
     const cached = await client.get(key);
 
     if(cached) {
       console.log("Cache hit");
 
       try {
-        const parsed = JSON.parse(cached);
-        return res.json({ reply: parsed.reply }); // ✅ FIXED
+        const parsed = JSON.parse(cached); // redis stores string .. converted to object 
+        return res.json({ reply: parsed.reply }); // chached answer -> no api call 
       } catch {
         return res.json({ reply: cached }); // fallback for old cache
+        // here when parse not needing old cache stored then this runs 
       }
     }
 
     // SEMANTIC CACHE 
+    const keys = await client.keys("v2:*"); // all cache entries fetched 
 
-    const keys = await client.keys("v2:*");
-
-    let bestMatch = null; // best cached answer
-    let bestScore = 0; // highest similarity
+    let bestMatch = null; // best cached question
+    let bestScore = 0; // highest similarity score 
 
     for (let k of keys) {
-      const value = await client.get(k);
+      const value = await client.get(k); // stored cache value as string (redis)
 
       try {
         const parsed = JSON.parse(value); // redis store string -> convert to object
 
-        if (!parsed.embedding) continue; // ignore old cache 
+        if (!parsed.embedding) continue; // ignore old cache with no embedding 
 
         const score = cosineSimilarity(qEmbedding, parsed.embedding);
 
@@ -62,7 +62,7 @@ app.post('/getResponse', async (req, res) => { // frontend request
           bestMatch = parsed;
         }
 
-      } catch (err) {
+      } catch (err) { // if caching fails 
         // ignore old cache (string format)
       }
     }
@@ -166,6 +166,7 @@ app.post('/getResponse', async (req, res) => { // frontend request
 
     }
 
+    // API call
     const apiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
@@ -181,8 +182,8 @@ app.post('/getResponse', async (req, res) => { // frontend request
           ],
           generationConfig: {
             maxOutputTokens: 500,   
-            temperature:0.3, 
-            topK:40 
+            temperature:0.3, // creativity
+            topK:40 // randomness -> lower focused ans
           }
         }),
       }
@@ -192,7 +193,7 @@ app.post('/getResponse', async (req, res) => { // frontend request
 
     console.log("FULL RESPONSE:", JSON.stringify(data, null, 2));
 
-    if (!data.candidates) {
+    if (!data.candidates) { // gemini fails
       return res.json({
         reply: "AI is temporarily unavailable"
       });
@@ -208,6 +209,7 @@ app.post('/getResponse', async (req, res) => { // frontend request
     "The provided context does not contain"
   ];
 
+  // cache only content wala reply 
   const shouldCache = !invalidReplies.some(msg =>
     reply.toLowerCase().includes(msg.toLowerCase())
   );
@@ -220,7 +222,7 @@ app.post('/getResponse', async (req, res) => { // frontend request
         embedding: qEmbedding,
         reply: reply
       }),
-      { EX: 300 }
+      { EX: 300 } // 5 mins
     );
 
     console.log("Stored in cache");
@@ -228,7 +230,7 @@ app.post('/getResponse', async (req, res) => { // frontend request
     console.log("Skipped bad response cache");
   }
 
-    res.json({ reply });
+    res.json({ reply }); // frontend recieves answer 
 
   } catch (error) {
     console.error("ERROR:", error);

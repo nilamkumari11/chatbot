@@ -19,7 +19,7 @@ async function getRelevantChunks(question) { // get embedding of questions
 
   return {
   text: topChunks.join("\n"),
-  score: scored[0]?.score || 0
+  score: scored[0]?.score || 0 // return the most relevant score
 };
 }
 
